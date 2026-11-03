@@ -23,6 +23,7 @@ pub struct ActiveLink {
     _agent: bluer::agent::AgentHandle,
     _discovery_task: tokio::task::JoinHandle<()>,
     _device_events_task: tokio::task::JoinHandle<()>,
+    _poll_task: tokio::task::JoinHandle<()>,
     adapter: bluer::Adapter,
     address: Address,
     latest_rssi: Arc<Mutex<Option<i16>>>,
@@ -42,15 +43,25 @@ fn spawn_rssi_discovery(
     cache: Arc<Mutex<Option<i16>>>,
 ) -> tokio::task::JoinHandle<()> {
     tokio::spawn(async move {
-        if let Ok(mut stream) = adapter.discover_devices().await {
+        if let Ok(mut stream) = adapter.discover_devices_with_changes().await {
             while let Some(event) = stream.next().await {
-                match event {
-                    AdapterEvent::DeviceAdded(addr) if addr == target => {
-                        pull_rssi(&adapter, addr, &cache).await;
-                    }
-                    _ => {}
+                if matches!(event, AdapterEvent::DeviceAdded(addr) if addr == target) {
+                    pull_rssi(&adapter, target, &cache).await;
                 }
             }
+        }
+    })
+}
+
+fn spawn_rssi_poll(
+    adapter: bluer::Adapter,
+    target: Address,
+    cache: Arc<Mutex<Option<i16>>>,
+) -> tokio::task::JoinHandle<()> {
+    tokio::spawn(async move {
+        loop {
+            pull_rssi(&adapter, target, &cache).await;
+            tokio::time::sleep(Duration::from_secs(1)).await;
         }
     })
 }
@@ -110,7 +121,7 @@ impl ActiveLink {
 
         adapter
             .set_discovery_filter(DiscoveryFilter {
-                transport: DiscoveryTransport::Le,
+                transport: DiscoveryTransport::Auto,
                 duplicate_data: true,
                 ..Default::default()
             })
@@ -121,6 +132,7 @@ impl ActiveLink {
         let discovery_task = spawn_rssi_discovery(adapter.clone(), addr, Arc::clone(&latest_rssi));
         let device_events_task =
             spawn_device_rssi_events(adapter.clone(), addr, Arc::clone(&latest_rssi));
+        let poll_task = spawn_rssi_poll(adapter.clone(), addr, Arc::clone(&latest_rssi));
 
         Self::wait_for_device(&adapter, addr, Duration::from_secs(20)).await?;
 
@@ -156,12 +168,19 @@ impl ActiveLink {
             .await
             .map_err(|e| BtError::Bluez(e.to_string()))?;
 
-        let _ = device.connect().await;
+        // RSSI BlueZ n’est fiable qu’en discovery : ne pas maintenir une connexion GATT/BR/EDR.
+        if device
+            .is_connected()
+            .await
+            .map_err(|e| BtError::Bluez(e.to_string()))?
+        {
+            let _ = device.disconnect().await;
+        }
 
         pull_rssi(&adapter, addr, &latest_rssi).await;
 
         let message = if trusted {
-            format!("{name} associé — discovery active pour le RSSI.")
+            format!("{name} associé — scan actif (écran du téléphone allumé si besoin).")
         } else {
             format!("{name} appairé ; vérifiez la confiance dans les paramètres BT.")
         };
@@ -180,6 +199,7 @@ impl ActiveLink {
                 _agent: agent_handle,
                 _discovery_task: discovery_task,
                 _device_events_task: device_events_task,
+                _poll_task: poll_task,
                 adapter,
                 address: addr,
                 latest_rssi,
@@ -214,7 +234,8 @@ impl ActiveLink {
 
     pub async fn read_rssi(&self) -> Result<Option<i16>, BtError> {
         pull_rssi(&self.adapter, self.address, &self.latest_rssi).await;
-        Ok(*self.latest_rssi.lock().await)
+        let cached = *self.latest_rssi.lock().await;
+        Ok(cached)
     }
 }
 
