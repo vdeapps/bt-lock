@@ -1,7 +1,11 @@
 [workspace]
 resolver = "2"
-members = ["crates/btlock-core"]
-default-members = ["crates/btlock-core"]
+members = [
+    "crates/btlock-core",
+    "crates/btlock-bt",
+    "crates/btlock-app/src-tauri",
+]
+default-members = ["crates/btlock-app/src-tauri"]
 
 [workspace.package]
 edition = "2021"

@@ -1,0 +1,17 @@
+[package]
+name = "btlock-bt"
+description = "Bluetooth LE scanning and RSSI for BTlock (Linux / BlueZ)"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+btlock-core = { path = "../btlock-core" }
+bluer = { version = "0.17", features = ["bluetoothd"] }
+futures = "0.3"
+serde = { version = "1", features = ["derive"] }
+thiserror = "2"
+tokio = { version = "1", features = ["rt", "time", "sync", "macros"] }
+
+[dev-dependencies]
+tokio = { version = "1", features = ["rt-multi-thread", "macros"] }
