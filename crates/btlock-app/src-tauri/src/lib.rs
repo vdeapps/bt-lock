@@ -133,7 +133,7 @@ async fn run_monitor(app: AppHandle, shared: SharedState, stop: Arc<Notify>) {
             _ = tokio::time::sleep(Duration::from_secs(2)) => {}
         }
 
-        let (device, settings) = {
+        let (_device, settings) = {
             let guard = shared.lock().await;
             let Some(device) = guard.config.device.clone() else {
                 continue;
@@ -209,7 +209,7 @@ async fn run_monitor(app: AppHandle, shared: SharedState, stop: Arc<Notify>) {
 #[tauri::command]
 async fn start_monitoring(app: AppHandle, state: State<'_, SharedState>) -> Result<(), String> {
     {
-        let mut guard = state.lock().await;
+        let guard = state.lock().await;
         if guard.config.device.is_none() {
             return Err("Choisissez un appareil Bluetooth d'abord.".into());
         }
