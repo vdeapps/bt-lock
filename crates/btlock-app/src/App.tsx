@@ -47,7 +47,7 @@ const demoConfig: AppConfig = {
   settings: {
     delay_before_lock_secs: 5,
     max_attempts: 3,
-    rssi_threshold_dbm: -70,
+    rssi_threshold_dbm: -80,
     lock_command: "loginctl lock-session",
   },
   device: {
@@ -261,7 +261,7 @@ function App() {
             <strong>{config.settings.max_attempts}</strong>
           </label>
           <label>
-            Seuil RSSI (dBm, plus bas = plus loin)
+            Seuil RSSI (verrouiller si mesure sous ce dBm — ex. -80 loin, -56 ~5 m)
             <input
               type="range"
               min={-95}

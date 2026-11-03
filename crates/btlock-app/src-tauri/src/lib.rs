@@ -1,7 +1,7 @@
 use btlock_bt::{scan_devices as bt_scan, associate_device, AssociationInfo, BtDevice};
 use btlock_core::{
-    config_path, is_signal_weak, load_config, lock_session, save_config, AppConfig, MonitorStatus,
-    SelectedDevice,
+    classify_signal, config_path, load_config, lock_session, save_config, AppConfig,
+    MonitorStatus, SelectedDevice, SignalState,
 };
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -164,21 +164,27 @@ async fn run_monitor(app: AppHandle, shared: SharedState, stop: Arc<Notify>) {
         let should_lock = {
             let mut guard = shared.lock().await;
             guard.status.last_rssi = rssi;
-            let weak = rssi
-                .map(|v| is_signal_weak(v, settings.rssi_threshold_dbm))
-                .unwrap_or(true);
-
-            if weak {
-                guard.status.weak_streak = guard.status.weak_streak.saturating_add(1);
-                guard.status.last_event = format!(
-                    "Signal faible ({}/{})",
-                    guard.status.weak_streak, settings.max_attempts
-                );
-                guard.status.weak_streak >= settings.max_attempts
-            } else {
-                guard.status.weak_streak = 0;
-                guard.status.last_event = format!("Signal OK ({rssi:?} dBm)");
-                false
+            match classify_signal(rssi, settings.rssi_threshold_dbm) {
+                SignalState::Weak => {
+                    guard.status.weak_streak = guard.status.weak_streak.saturating_add(1);
+                    guard.status.last_event = format!(
+                        "Signal faible ({}/{}) — {rssi:?} dBm, seuil {} dBm",
+                        guard.status.weak_streak,
+                        settings.max_attempts,
+                        settings.rssi_threshold_dbm
+                    );
+                    guard.status.weak_streak >= settings.max_attempts
+                }
+                SignalState::Strong => {
+                    guard.status.weak_streak = 0;
+                    guard.status.last_event = format!("Signal OK ({rssi:?} dBm)");
+                    false
+                }
+                SignalState::Unknown => {
+                    guard.status.last_event =
+                        "Mesure RSSI indisponible — pas de verrouillage".into();
+                    false
+                }
             }
         };
 
@@ -194,13 +200,31 @@ async fn run_monitor(app: AppHandle, shared: SharedState, stop: Arc<Notify>) {
                 _ = stop.notified() => break,
                 _ = tokio::time::sleep(Duration::from_secs(settings.delay_before_lock_secs as u64)) => {}
             }
-            let mut guard = shared.lock().await;
-            if let Err(e) = lock_session(&settings) {
-                guard.status.last_event = format!("Échec verrouillage : {e}");
-            } else {
-                guard.status.last_event = "Session verrouillée".into();
-                guard.status.weak_streak = 0;
-                let _ = app.emit("session-locked", ());
+            let confirm = link.read_rssi().await.ok().flatten();
+            match classify_signal(confirm, settings.rssi_threshold_dbm) {
+                SignalState::Weak => {
+                    let mut guard = shared.lock().await;
+                    if let Err(e) = lock_session(&settings) {
+                        guard.status.last_event = format!("Échec verrouillage : {e}");
+                    } else {
+                        guard.status.last_event = "Session verrouillée".into();
+                        guard.status.weak_streak = 0;
+                        let _ = app.emit("session-locked", ());
+                    }
+                }
+                SignalState::Strong => {
+                    let mut guard = shared.lock().await;
+                    guard.status.weak_streak = 0;
+                    guard.status.last_event = format!(
+                        "Verrouillage annulé — signal OK ({confirm:?} dBm)"
+                    );
+                }
+                SignalState::Unknown => {
+                    let mut guard = shared.lock().await;
+                    guard.status.weak_streak = 0;
+                    guard.status.last_event =
+                        "Verrouillage annulé — mesure RSSI indisponible".into();
+                }
             }
         }
     }

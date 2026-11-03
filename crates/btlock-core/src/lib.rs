@@ -17,7 +17,7 @@ impl Default for LockSettings {
         Self {
             delay_before_lock_secs: 5,
             max_attempts: 3,
-            rssi_threshold_dbm: -70,
+            rssi_threshold_dbm: -80,
             lock_command: "loginctl lock-session".into(),
         }
     }
@@ -96,9 +96,26 @@ pub fn save_config(path: &Path, config: &AppConfig) -> Result<(), ConfigError> {
     Ok(())
 }
 
+/// État du signal pour la politique de verrouillage.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SignalState {
+    Strong,
+    Weak,
+    Unknown,
+}
+
 /// Returns true when signal is considered too weak (device "far").
 pub fn is_signal_weak(rssi: i16, threshold: i16) -> bool {
     rssi < threshold
+}
+
+/// Une mesure absente n'est pas un signal faible (évite les faux verrouillages).
+pub fn classify_signal(rssi: Option<i16>, threshold: i16) -> SignalState {
+    match rssi {
+        Some(v) if v < threshold => SignalState::Weak,
+        Some(_) => SignalState::Strong,
+        None => SignalState::Unknown,
+    }
 }
 
 /// Lock the graphical session using the configured shell command.
@@ -130,6 +147,11 @@ mod tests {
         let s = LockSettings::default();
         assert!(s.delay_before_lock_secs > 0);
         assert!(s.rssi_threshold_dbm < 0);
+    }
+
+    #[test]
+    fn unknown_signal_is_not_weak() {
+        assert_eq!(classify_signal(None, -70), SignalState::Unknown);
     }
 
     #[test]
