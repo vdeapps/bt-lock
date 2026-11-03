@@ -1,0 +1,30 @@
+[package]
+name = "btlock-app"
+version = "0.1.0"
+description = "BTlock — verrouillage Bluetooth"
+authors = ["BTlock"]
+edition = "2021"
+
+[lib]
+name = "btlock_app_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+btlock-bt = { path = "../../btlock-bt" }
+btlock-core = { path = "../../btlock-core" }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+tauri = { version = "2", features = ["tray-icon"] }
+tauri-plugin-opener = "2"
+thiserror = "2"
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "time", "sync"] }
+
+[profile.release]
+codegen-units = 1
+lto = true
+opt-level = 3
+panic = "abort"
+strip = true
