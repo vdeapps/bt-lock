@@ -18,11 +18,12 @@
         "height": 640,
         "minWidth": 820,
         "minHeight": 560,
-        "center": true
+        "center": true,
+        "devtools": false
       }
     ],
     "security": {
-      "csp": null
+      "csp": "default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval'; style-src 'self' 'unsafe-inline'; connect-src ipc: http://ipc.localhost http://127.0.0.1:* ws://127.0.0.1:*; img-src 'self' asset: https://asset.localhost data:"
     }
   },
   "bundle": {

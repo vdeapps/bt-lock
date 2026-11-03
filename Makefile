@@ -1,4 +1,7 @@
-.PHONY: test lint typecheck fmt
+.PHONY: test lint typecheck fmt run
+
+run:
+	cd crates/btlock-app && npm run tauri dev
 
 test:
 	cargo test --workspace

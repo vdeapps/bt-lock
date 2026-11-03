@@ -1,0 +1,19 @@
+[package]
+name = "btlock-gui"
+description = "BTlock — interface GTK 4 native (Libadwaita)"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[[bin]]
+name = "btlock"
+path = "src/main.rs"
+
+[dependencies]
+btlock-core = { path = "../btlock-core" }
+btlock-engine = { path = "../btlock-engine" }
+btlock-bt = { path = "../btlock-bt" }
+gtk = { package = "gtk4", version = "0.9", features = ["v4_12"] }
+libadwaita = { version = "0.7", features = ["v1_5"] }
+glib = "0.20"
+tokio = { version = "1", features = ["rt-multi-thread", "macros"] }

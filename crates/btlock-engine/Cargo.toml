@@ -1,0 +1,11 @@
+[package]
+name = "btlock-engine"
+description = "BTlock application state, monitoring loop, persistence"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+btlock-bt = { path = "../btlock-bt" }
+btlock-core = { path = "../btlock-core" }
+tokio = { version = "1", features = ["rt-multi-thread", "sync", "time", "macros"] }

@@ -2,45 +2,59 @@
 
 ## Objectif
 
-Verrouiller la session utilisateur lorsqu'un périphérique Bluetooth configuré (téléphone ou montre) s'éloigne de la machine, avec configuration, paramètres et présence en barre système.
+Verrouiller la session utilisateur lorsqu’un périphérique Bluetooth configuré (téléphone ou montre) s’éloigne, avec paramètres, barre système et exécution **uniquement** via l’application Tauri (pas de mode navigateur).
 
 ## Stack
 
-| Couche | Choix | Raison |
-|--------|--------|--------|
-| OS v1 | Linux | Besoin exprimé ; APIs session/ BT stables via logind et BlueZ. |
-| Backend | Rust | Exigence projet ; logique BT, lock, tray. |
-| UI | **Tauri 2** | Écosystème le plus répandu pour bureaux modernes « soignés » (HTML/CSS, animations, thèmes). |
-| BT | BLE + BlueZ | Téléphones et montres exposent souvent BLE ; mesure RSSI pour proximité. Classic en option si appareil sans LE. |
-| Session | logind (D-Bus) | Verrouillage standard sur bureau Linux. |
-| Tray | Tauri tray / lib tray | Application residente après fermeture de la fenêtre principale. |
+| Couche | Choix | Rôle |
+|--------|--------|------|
+| OS v1 | Linux | logind + BlueZ |
+| Logique | Rust `btlock-engine` | Surveillance, config, lock |
+| UI | Tauri 2 + React | WebView système, IPC invoke |
+| BT | `bluer` → BlueZ | Scan, pair, trust, RSSI, ACL |
+| Session | logind | `loginctl lock-session` par défaut |
+| Tray | Tauri tray | App residente (fenêtre masquée à la fermeture) |
 
-## Composants (cible)
+## Composants
 
 ```text
 crates/
-  btlock-core/     # modèle config, seuils RSSI, politique retry, lock
-  btlock-bt/       # scan, pairing léger, suivi RSSI (async)
-  btlock-app/      # binaire Tauri + commandes IPC
-src-ui/            # frontend Tauri (à créer au scaffold)
+  btlock-core/      # LockSettings, ProximityMethod, classify_signal, config JSON
+  btlock-bt/        # ActiveLink, scan, associate, read_fresh_rssi, presence_via_link
+  btlock-engine/    # engine_start_monitoring, run_monitor, hooks session locked
+  btlock-app/       # Tauri commands + React (src/)
+  btlock-gui/       # Variante GTK (optionnelle, même engine)
 ```
 
-## Paramètres utilisateur (besoin)
+## Modes de proximité
 
-- Appareil BT sélectionné (identifiant stable : adresse / UUID service).
-- Délai avant verrouillage après perte de signal ou RSSI sous seuil.
-- Nombre de tentatives / hysteresis (éviter locks intempestifs).
-- Seuil RSSI (puissance) et éventuellement lissage (moyenne glissante).
-- Commande ou mécanisme de lock ( défaut : session courante logind ).
+| Mode | Config | Verrouillage |
+|------|--------|--------------|
+| `link_presence` (défaut) | Connexion ACL maintenue | Déconnexion BT après hysteresis |
+| `rssi` | Seuil `rssi_threshold_dbm` | Mesure **&lt; 3 s** sous le seuil |
+
+Politique commune : `max_attempts` lectures « faibles » consécutives, puis `delay_before_lock_secs`, puis confirmation avant lock.
+
+## Configuration
+
+Fichier : `~/.config/btlock/config.json`
+
+Champs principaux : `device`, `settings.delay_before_lock_secs`, `settings.max_attempts`, `settings.rssi_threshold_dbm`, `settings.proximity_method`, `settings.lock_command`.
+
+## Sécurité UI
+
+- `devtools: false` (fenêtre Tauri).
+- Capability `core:webview:deny-internal-toggle-devtools`.
+- Front : pas de mode démo hors Tauri ; raccourcis DevTools / menu contextuel bloqués dans l’app.
+- CSP restrictive (scripts locaux + IPC Tauri).
 
 ## Risques connus
 
-- RSSI BLE bruité : prévoir hysteresis et délai.
-- Montres en mode économie d'énergie : connexion intermittente.
-- Permissions : groupe `bluetooth`, PolicyKit si actions sensibles.
+- RSSI bruité ; mode RSSI ignore les mesures expirées.
+- Android / Realme : veille agressive → préférer `link_presence`, appairage + confiance BlueZ.
+- Groupe `bluetooth` requis pour BlueZ côté utilisateur.
 
-## Prochaines étapes implémentation
+## Hors v1
 
-1. Scaffold Tauri 2 + workspace Cargo.
-2. POC scan BLE et lecture RSSI d'un téléphone à proximité.
-3. Intégration lock logind + tray.
+- Windows / macOS (autre stack BT et lock).
+- Appli compagnon sur le téléphone.

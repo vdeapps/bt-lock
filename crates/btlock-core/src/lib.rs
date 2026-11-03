@@ -4,12 +4,24 @@ use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 use thiserror::Error;
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum ProximityMethod {
+    /// Connexion ACL maintenue — fiable écran éteint (recommandé).
+    #[default]
+    LinkPresence,
+    /// Seuil RSSI (mesures fraîches uniquement).
+    Rssi,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct LockSettings {
     pub delay_before_lock_secs: u32,
     pub max_attempts: u32,
     pub rssi_threshold_dbm: i16,
     pub lock_command: String,
+    #[serde(default)]
+    pub proximity_method: ProximityMethod,
 }
 
 impl Default for LockSettings {
@@ -19,6 +31,7 @@ impl Default for LockSettings {
             max_attempts: 3,
             rssi_threshold_dbm: -80,
             lock_command: "loginctl lock-session".into(),
+            proximity_method: ProximityMethod::default(),
         }
     }
 }
@@ -49,6 +62,7 @@ pub struct AppConfig {
 pub struct MonitorStatus {
     pub active: bool,
     pub last_rssi: Option<i16>,
+    pub link_connected: Option<bool>,
     pub weak_streak: u32,
     pub last_event: String,
 }
@@ -58,6 +72,7 @@ impl Default for MonitorStatus {
         Self {
             active: false,
             last_rssi: None,
+            link_connected: None,
             weak_streak: 0,
             last_event: "Inactif".into(),
         }
@@ -118,7 +133,13 @@ pub fn classify_signal(rssi: Option<i16>, threshold: i16) -> SignalState {
     }
 }
 
-/// Lock the graphical session using the configured shell command.
+pub fn classify_link_presence(connected: bool) -> SignalState {
+    if connected {
+        SignalState::Strong
+    } else {
+        SignalState::Weak
+    }
+}
 pub fn lock_session(settings: &LockSettings) -> Result<(), ConfigError> {
     let parts: Vec<&str> = settings.lock_command.split_whitespace().collect();
     if parts.is_empty() {

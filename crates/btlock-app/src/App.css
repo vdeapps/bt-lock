@@ -124,6 +124,32 @@ body {
   color: #bae6fd;
 }
 
+.web-preview-banner {
+  margin-bottom: 1rem;
+  padding: 0.85rem 1rem;
+  border-radius: 10px;
+  background: rgba(251, 191, 36, 0.15);
+  border: 1px solid rgba(251, 191, 36, 0.45);
+  color: #fde68a;
+  font-size: 0.92rem;
+  line-height: 1.45;
+}
+
+.shell.blocked {
+  max-width: 32rem;
+  margin: 4rem auto;
+  padding: 2rem;
+  text-align: center;
+}
+
+.shell.blocked h1 {
+  margin-bottom: 1rem;
+}
+
+.shell.blocked code {
+  font-size: 0.9rem;
+}
+
 .grid {
   display: grid;
   grid-template-columns: 1.1fr 1fr;

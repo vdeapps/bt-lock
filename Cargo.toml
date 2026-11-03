@@ -3,6 +3,8 @@ resolver = "2"
 members = [
     "crates/btlock-core",
     "crates/btlock-bt",
+    "crates/btlock-engine",
+    "crates/btlock-gui",
     "crates/btlock-app/src-tauri",
 ]
 default-members = ["crates/btlock-app/src-tauri"]

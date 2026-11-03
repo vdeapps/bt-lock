@@ -1,7 +1,27 @@
-# Tauri + React + Typescript
+# BTlock (Tauri 2)
 
-This template should help get you started developing with Tauri, React and Typescript in Vite.
+Application principale du projet.
 
-## Recommended IDE Setup
+## Lancer
 
-- [VS Code](https://code.visualstudio.com/) + [Tauri](https://marketplace.visualstudio.com/items?itemName=tauri-apps.tauri-vscode) + [rust-analyzer](https://marketplace.visualstudio.com/items?itemName=rust-lang.rust-analyzer)
+```bash
+npm install
+npm run tauri dev
+```
+
+## Build
+
+```bash
+npm run tauri build
+```
+
+Voir `../../docs/build.md`.
+
+## Sécurité
+
+- Pas d’usage fonctionnel dans le navigateur (`isTauri()` requis côté React).
+- DevTools désactivés en release ; permission Tauri `deny-internal-toggle-devtools`.
+
+## Backend
+
+Commandes IPC dans `src-tauri/src/lib.rs` — délégation à `btlock-engine`.

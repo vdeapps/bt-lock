@@ -1,11 +1,12 @@
 //! Session BlueZ maintenue (discovery + agent) pour un appareil associé.
 
+use btlock_core::ProximityMethod;
 use crate::{guess_kind, BtDevice, BtError};
 use bluer::agent::Agent;
 use bluer::{Address, AdapterEvent, DeviceEvent, DeviceProperty, DiscoveryFilter, DiscoveryTransport};
 use futures::StreamExt;
 use std::sync::Arc;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 use tokio::sync::Mutex;
 
 /// Résultat de l’association (appairage / confiance).
@@ -26,13 +27,22 @@ pub struct ActiveLink {
     _poll_task: tokio::task::JoinHandle<()>,
     adapter: bluer::Adapter,
     address: Address,
-    latest_rssi: Arc<Mutex<Option<i16>>>,
+    latest_rssi: Arc<Mutex<RssiStamp>>,
 }
 
-async fn pull_rssi(adapter: &bluer::Adapter, addr: Address, cache: &Mutex<Option<i16>>) {
+/// Au-delà de cette durée, une mesure RSSI n’est plus affichée ni utilisée pour verrouiller.
+pub const RSSI_MAX_AGE: Duration = Duration::from_secs(3);
+
+type RssiStamp = Option<(i16, Instant)>;
+
+async fn store_rssi(cache: &Mutex<RssiStamp>, value: i16) {
+    *cache.lock().await = Some((value, Instant::now()));
+}
+
+async fn pull_rssi(adapter: &bluer::Adapter, addr: Address, cache: &Mutex<RssiStamp>) {
     if let Ok(device) = adapter.device(addr) {
         if let Ok(Some(v)) = device.rssi().await {
-            *cache.lock().await = Some(v);
+            store_rssi(cache, v).await;
         }
     }
 }
@@ -40,7 +50,7 @@ async fn pull_rssi(adapter: &bluer::Adapter, addr: Address, cache: &Mutex<Option
 fn spawn_rssi_discovery(
     adapter: bluer::Adapter,
     target: Address,
-    cache: Arc<Mutex<Option<i16>>>,
+    cache: Arc<Mutex<RssiStamp>>,
 ) -> tokio::task::JoinHandle<()> {
     tokio::spawn(async move {
         if let Ok(mut stream) = adapter.discover_devices_with_changes().await {
@@ -56,7 +66,7 @@ fn spawn_rssi_discovery(
 fn spawn_rssi_poll(
     adapter: bluer::Adapter,
     target: Address,
-    cache: Arc<Mutex<Option<i16>>>,
+    cache: Arc<Mutex<RssiStamp>>,
 ) -> tokio::task::JoinHandle<()> {
     tokio::spawn(async move {
         loop {
@@ -69,7 +79,7 @@ fn spawn_rssi_poll(
 fn spawn_device_rssi_events(
     adapter: bluer::Adapter,
     target: Address,
-    cache: Arc<Mutex<Option<i16>>>,
+    cache: Arc<Mutex<RssiStamp>>,
 ) -> tokio::task::JoinHandle<()> {
     tokio::spawn(async move {
         loop {
@@ -83,7 +93,7 @@ fn spawn_device_rssi_events(
             };
             while let Some(event) = events.next().await {
                 if let DeviceEvent::PropertyChanged(DeviceProperty::Rssi(v)) = event {
-                    *cache.lock().await = Some(v);
+                    store_rssi(&cache, v).await;
                 }
             }
             tokio::time::sleep(Duration::from_millis(500)).await;
@@ -180,7 +190,7 @@ impl ActiveLink {
         pull_rssi(&adapter, addr, &latest_rssi).await;
 
         let message = if trusted {
-            format!("{name} associé — scan actif (écran du téléphone allumé si besoin).")
+            format!("{name} associé — prêt pour la surveillance.")
         } else {
             format!("{name} appairé ; vérifiez la confiance dans les paramètres BT.")
         };
@@ -232,10 +242,79 @@ impl ActiveLink {
         }
     }
 
-    pub async fn read_rssi(&self) -> Result<Option<i16>, BtError> {
+    pub fn device(&self) -> Result<bluer::Device, BtError> {
+        self.adapter
+            .device(self.address)
+            .map_err(|e| BtError::Bluez(e.to_string()))
+    }
+
+    pub async fn is_connected(&self) -> Result<bool, BtError> {
+        let device = self.device()?;
+        device
+            .is_connected()
+            .await
+            .map_err(|e| BtError::Bluez(e.to_string()))
+    }
+
+    pub async fn ensure_connected(&self) -> Result<(), BtError> {
+        let device = self.device()?;
+        if device
+            .is_connected()
+            .await
+            .map_err(|e| BtError::Bluez(e.to_string()))?
+        {
+            return Ok(());
+        }
+        device.connect().await.map_err(|e| {
+            BtError::Bluez(format!(
+                "connexion : {e} — gardez le Bluetooth actif sur le téléphone"
+            ))
+        })
+    }
+
+    /// Prépare la surveillance selon le mode (connexion ACL ou scan RSSI seul).
+    pub async fn prepare_for_monitoring(&self, method: ProximityMethod) -> Result<(), BtError> {
+        match method {
+            ProximityMethod::LinkPresence => self.ensure_connected().await,
+            ProximityMethod::Rssi => {
+                let device = self.device()?;
+                if device
+                    .is_connected()
+                    .await
+                    .map_err(|e| BtError::Bluez(e.to_string()))?
+                {
+                    let _ = device.disconnect().await;
+                }
+                Ok(())
+            }
+        }
+    }
+
+    pub async fn read_fresh_rssi(&self) -> Result<Option<i16>, BtError> {
         pull_rssi(&self.adapter, self.address, &self.latest_rssi).await;
-        let cached = *self.latest_rssi.lock().await;
-        Ok(cached)
+        let guard = self.latest_rssi.lock().await;
+        Ok(guard.and_then(|(v, t)| {
+            if t.elapsed() <= RSSI_MAX_AGE {
+                Some(v)
+            } else {
+                None
+            }
+        }))
+    }
+
+    pub async fn read_rssi(&self) -> Result<Option<i16>, BtError> {
+        self.read_fresh_rssi().await
+    }
+
+    /// Présence fiable : tente de reconnecter avant de conclure « absent ».
+    pub async fn presence_via_link(&self) -> Result<bool, BtError> {
+        if self.is_connected().await? {
+            return Ok(true);
+        }
+        if self.ensure_connected().await.is_ok() && self.is_connected().await? {
+            return Ok(true);
+        }
+        Ok(false)
     }
 }
 

@@ -1,13 +1,18 @@
 # BTlock
 
-Verrouillage de session Linux quand un téléphone ou une montre Bluetooth s’éloigne.
+Verrouillage de session **Linux** quand votre **téléphone** ou **montre** Bluetooth s’éloigne (ou sort du seuil RSSI configuré).
 
-## Prérequis
+## Documentation
 
-- Linux, BlueZ, Rust, Node.js npm
-- Tauri deps : https://tauri.app/start/prerequisites/
+| Public | Lien |
+|--------|------|
+| **Utiliser et régler l’app** | [docs/guide-utilisateur.md](docs/guide-utilisateur.md) |
+| **Installer** (.deb, AppImage) | [docs/installation.md](docs/installation.md) |
+| **Fichier config JSON** | [docs/configuration.md](docs/configuration.md) |
+| **Build / dev** | [docs/build.md](docs/build.md) |
+| **Index complet** | [docs/README.md](docs/README.md) |
 
-## Développement
+## Démarrage rapide (développement)
 
 ```bash
 cd crates/btlock-app
@@ -15,16 +20,14 @@ npm install
 npm run tauri dev
 ```
 
-Qualité (racine du dépôt) :
+Build release : voir [docs/build.md](docs/build.md).
+
+Config utilisateur : `~/.config/btlock/config.json`
+
+## Qualité
 
 ```bash
 make test
 make lint
 make typecheck
 ```
-
-## Configuration
-
-Fichier : `~/.config/btlock/config.json`
-
-Guide test RSSI réel : `docs/test-rssi.md`
