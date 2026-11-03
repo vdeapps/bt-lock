@@ -40,3 +40,18 @@ Pour un essai sans lock réel, augmentez le délai ou le nombre de lectures faib
 ## 4. Rapporter
 
 Noter : adresse, RSSI proche / loin, comportement au lock. En cas d’erreur BlueZ, coller le message affiché dans l’onglet **État** ou la CLI.
+
+## Exemple de calibration (suricate-laptop)
+
+| Situation | RSSI observé |
+|-----------|----------------|
+| Téléphone collé au PC | ≈ **-39 dBm** |
+| Téléphone à ~**5 m** | ≈ **-54 dBm** |
+
+Réglage indicatif dans l’app :
+
+- Verrouiller **vers 5 m et au-delà** : seuil **-55 à -58 dBm** (juste sous la mesure à 5 m), 3 lectures faibles, délai 5 s.
+- Verrouiller **seulement hors pièce / très loin** : **-70 dBm** ou plus bas (ex. -75).
+- Toujours valider en s’éloignant progressivement : le RSSI varie selon murs, orientation et modèle de téléphone.
+
+Si la valeur reste bloquée (ex. toujours -54 dBm), **resélectionnez l’appareil** après mise à jour BTlock : l’app écoute désormais les mises à jour BlueZ en continu (scan LE + événements RSSI).

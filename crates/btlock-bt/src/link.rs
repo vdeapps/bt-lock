@@ -2,9 +2,11 @@
 
 use crate::{guess_kind, BtDevice, BtError};
 use bluer::agent::Agent;
-use bluer::{Address, DiscoveryFilter, DiscoveryTransport};
+use bluer::{Address, AdapterEvent, DeviceEvent, DeviceProperty, DiscoveryFilter, DiscoveryTransport};
 use futures::StreamExt;
+use std::sync::Arc;
 use std::time::Duration;
+use tokio::sync::Mutex;
 
 /// Résultat de l’association (appairage / confiance).
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
@@ -20,8 +22,62 @@ pub struct ActiveLink {
     _session: bluer::Session,
     _agent: bluer::agent::AgentHandle,
     _discovery_task: tokio::task::JoinHandle<()>,
+    _device_events_task: tokio::task::JoinHandle<()>,
     adapter: bluer::Adapter,
     address: Address,
+    latest_rssi: Arc<Mutex<Option<i16>>>,
+}
+
+async fn pull_rssi(adapter: &bluer::Adapter, addr: Address, cache: &Mutex<Option<i16>>) {
+    if let Ok(device) = adapter.device(addr) {
+        if let Ok(Some(v)) = device.rssi().await {
+            *cache.lock().await = Some(v);
+        }
+    }
+}
+
+fn spawn_rssi_discovery(
+    adapter: bluer::Adapter,
+    target: Address,
+    cache: Arc<Mutex<Option<i16>>>,
+) -> tokio::task::JoinHandle<()> {
+    tokio::spawn(async move {
+        if let Ok(mut stream) = adapter.discover_devices().await {
+            while let Some(event) = stream.next().await {
+                match event {
+                    AdapterEvent::DeviceAdded(addr) if addr == target => {
+                        pull_rssi(&adapter, addr, &cache).await;
+                    }
+                    _ => {}
+                }
+            }
+        }
+    })
+}
+
+fn spawn_device_rssi_events(
+    adapter: bluer::Adapter,
+    target: Address,
+    cache: Arc<Mutex<Option<i16>>>,
+) -> tokio::task::JoinHandle<()> {
+    tokio::spawn(async move {
+        loop {
+            let Ok(device) = adapter.device(target) else {
+                tokio::time::sleep(Duration::from_secs(2)).await;
+                continue;
+            };
+            let Ok(mut events) = device.events().await else {
+                tokio::time::sleep(Duration::from_secs(2)).await;
+                continue;
+            };
+            while let Some(event) = events.next().await {
+                if let DeviceEvent::PropertyChanged(DeviceProperty::Rssi(v)) = event {
+                    *cache.lock().await = Some(v);
+                }
+            }
+            tokio::time::sleep(Duration::from_millis(500)).await;
+        }
+    })
 }
 
 impl ActiveLink {
@@ -54,18 +110,17 @@ impl ActiveLink {
 
         adapter
             .set_discovery_filter(DiscoveryFilter {
-                transport: DiscoveryTransport::Auto,
+                transport: DiscoveryTransport::Le,
+                duplicate_data: true,
                 ..Default::default()
             })
             .await
             .map_err(|e| BtError::Bluez(e.to_string()))?;
 
-        let adapter_bg = adapter.clone();
-        let discovery_task = tokio::spawn(async move {
-            if let Ok(mut stream) = adapter_bg.discover_devices().await {
-                while stream.next().await.is_some() {}
-            }
-        });
+        let latest_rssi = Arc::new(Mutex::new(None));
+        let discovery_task = spawn_rssi_discovery(adapter.clone(), addr, Arc::clone(&latest_rssi));
+        let device_events_task =
+            spawn_device_rssi_events(adapter.clone(), addr, Arc::clone(&latest_rssi));
 
         Self::wait_for_device(&adapter, addr, Duration::from_secs(20)).await?;
 
@@ -103,6 +158,8 @@ impl ActiveLink {
 
         let _ = device.connect().await;
 
+        pull_rssi(&adapter, addr, &latest_rssi).await;
+
         let message = if trusted {
             format!("{name} associé — discovery active pour le RSSI.")
         } else {
@@ -122,8 +179,10 @@ impl ActiveLink {
                 _session: session,
                 _agent: agent_handle,
                 _discovery_task: discovery_task,
+                _device_events_task: device_events_task,
                 adapter,
                 address: addr,
+                latest_rssi,
             },
             info,
         ))
@@ -154,14 +213,8 @@ impl ActiveLink {
     }
 
     pub async fn read_rssi(&self) -> Result<Option<i16>, BtError> {
-        let device = self
-            .adapter
-            .device(self.address)
-            .map_err(|e| BtError::Bluez(e.to_string()))?;
-        device
-            .rssi()
-            .await
-            .map_err(|e| BtError::Bluez(e.to_string()))
+        pull_rssi(&self.adapter, self.address, &self.latest_rssi).await;
+        Ok(*self.latest_rssi.lock().await)
     }
 }
 
