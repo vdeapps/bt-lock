@@ -1,0 +1,10 @@
+**/.orchestrateur/
+/target/
+**/*.rs.bk
+.DS_Store
+.idea/
+.vscode/
+*.swp
+node_modules/
+dist/
+crates/btlock-app/gen/

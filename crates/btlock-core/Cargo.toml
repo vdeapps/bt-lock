@@ -1,0 +1,8 @@
+[package]
+name = "btlock-core"
+description = "Configuration and lock policy for BTlock"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
