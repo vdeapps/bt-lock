@@ -1,4 +1,4 @@
-use btlock_bt::{scan_devices as bt_scan, BtDevice};
+use btlock_bt::{scan_devices as bt_scan, associate_device, AssociationInfo, BtDevice};
 use btlock_core::{
     config_path, is_signal_weak, load_config, lock_session, save_config, AppConfig, MonitorStatus,
     SelectedDevice,
@@ -24,6 +24,7 @@ struct AppState {
     config_path: PathBuf,
     status: MonitorStatus,
     monitor: Option<MonitorHandle>,
+    active_link: Option<Arc<btlock_bt::ActiveLink>>,
 }
 
 impl AppState {
@@ -35,6 +36,7 @@ impl AppState {
             config_path: path,
             status: MonitorStatus::default(),
             monitor: None,
+            active_link: None,
         }
     }
 
@@ -74,23 +76,53 @@ async fn select_device(
     device: BtDevice,
     state: State<'_, SharedState>,
 ) -> Result<AppConfig, String> {
+    let (link, info) = associate_device(&device.address)
+        .await
+        .map_err(|e| e.to_string())?;
     let mut guard = state.lock().await;
+    guard.active_link = Some(Arc::new(link));
     guard.config.device = Some(SelectedDevice {
         address: device.address,
         name: device.name,
         kind: device.kind,
     });
+    guard.status.last_event = info.message;
     guard.persist()?;
     Ok(guard.config.clone())
 }
 
-fn stop_monitor(guard: &mut AppState) {
+#[tauri::command]
+async fn associate_saved_device(state: State<'_, SharedState>) -> Result<AssociationInfo, String> {
+    let address = {
+        let guard = state.lock().await;
+        guard
+            .config
+            .device
+            .as_ref()
+            .map(|d| d.address.clone())
+            .ok_or_else(|| "Aucun appareil sélectionné.".to_string())?
+    };
+    let (link, info) = associate_device(&address)
+        .await
+        .map_err(|e| e.to_string())?;
+    let mut guard = state.lock().await;
+    guard.active_link = Some(Arc::new(link));
+    guard.status.last_event = info.message.clone();
+    Ok(info)
+}
+
+fn stop_monitor_task(guard: &mut AppState) {
     if let Some(handle) = guard.monitor.take() {
         handle.stop.notify_one();
     }
     guard.status.active = false;
-    guard.status.last_event = "Surveillance arrêtée".into();
     guard.config.monitoring_enabled = false;
+}
+
+fn stop_monitor(guard: &mut AppState) {
+    stop_monitor_task(guard);
+    guard.status.last_event = "Surveillance arrêtée".into();
+    guard.active_link = None;
     let _ = guard.persist();
 }
 
@@ -109,7 +141,18 @@ async fn run_monitor(app: AppHandle, shared: SharedState, stop: Arc<Notify>) {
             (device, guard.config.settings.clone())
         };
 
-        let rssi = match btlock_bt::read_rssi(&device.address).await {
+        let link = {
+            let guard = shared.lock().await;
+            guard.active_link.clone()
+        };
+        let Some(link) = link else {
+            let mut guard = shared.lock().await;
+            guard.status.last_event =
+                "Appareil non associé — resélectionnez après Rechercher".into();
+            continue;
+        };
+
+        let rssi = match link.read_rssi().await {
             Ok(v) => v,
             Err(e) => {
                 let mut guard = shared.lock().await;
@@ -165,11 +208,25 @@ async fn run_monitor(app: AppHandle, shared: SharedState, stop: Arc<Notify>) {
 
 #[tauri::command]
 async fn start_monitoring(app: AppHandle, state: State<'_, SharedState>) -> Result<(), String> {
-    let mut guard = state.lock().await;
-    if guard.config.device.is_none() {
-        return Err("Choisissez un appareil Bluetooth d'abord.".into());
+    {
+        let mut guard = state.lock().await;
+        if guard.config.device.is_none() {
+            return Err("Choisissez un appareil Bluetooth d'abord.".into());
+        }
+        if guard.active_link.is_none() {
+            let address = guard.config.device.as_ref().unwrap().address.clone();
+            drop(guard);
+            let (link, info) = associate_device(&address)
+                .await
+                .map_err(|e| e.to_string())?;
+            let mut guard = state.lock().await;
+            guard.active_link = Some(Arc::new(link));
+            guard.status.last_event = info.message;
+        }
     }
-    stop_monitor(&mut guard);
+
+    let mut guard = state.lock().await;
+    stop_monitor_task(&mut guard);
     guard.config.monitoring_enabled = true;
     guard.status = MonitorStatus {
         active: true,
@@ -255,6 +312,7 @@ pub fn run() {
             get_status,
             scan_devices,
             select_device,
+            associate_saved_device,
             start_monitoring,
             stop_monitoring,
         ])

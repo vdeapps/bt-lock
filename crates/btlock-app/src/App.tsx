@@ -144,9 +144,14 @@ function App() {
   };
 
   const pickDevice = async (device: BtDevice) => {
-    const cfg = await invoke<AppConfig>("select_device", { device });
-    setConfig(cfg);
-    setMessage(`${device.name} sélectionné.`);
+    setMessage(`Association avec ${device.name}… (acceptez l’appairage sur l’appareil si demandé)`);
+    try {
+      const cfg = await invoke<AppConfig>("select_device", { device });
+      setConfig(cfg);
+      setMessage(`${device.name} associé — vous pouvez démarrer la surveillance.`);
+    } catch (e) {
+      setMessage(String(e));
+    }
   };
 
   const toggleMonitor = async () => {

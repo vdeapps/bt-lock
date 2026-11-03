@@ -8,7 +8,7 @@
 
 ## 1. Trouver l’adresse
 
-Dans l’app **BTlock** (`npm run tauri dev`) : **Rechercher** (~8 s), noter l’adresse de votre appareil.
+Dans l’app **BTlock** : **Rechercher** (~8 s), puis **cliquer l’appareil** — l’app tente l’**appairage et la confiance** BlueZ (acceptez sur le téléphone / montre si une popup apparaît).
 
 Ou en CLI :
 
