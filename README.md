@@ -26,3 +26,5 @@ make typecheck
 ## Configuration
 
 Fichier : `~/.config/btlock/config.json`
+
+Guide test RSSI réel : `docs/test-rssi.md`
